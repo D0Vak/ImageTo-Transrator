@@ -1,4 +1,5 @@
-// Standalone Browser Version (Hybrid Transliteration Edition)
+// Standalone Browser Version (Ultra-Light & High Speed Edition)
+// No heavy dictionary downloads required.
 
 // Elements
 const dropZone = document.getElementById('drop-zone');
@@ -26,7 +27,6 @@ const dictMeaning = document.getElementById('dict-meaning');
 const closeModal = document.getElementById('close-modal');
 
 let selectedFile = null;
-let tokenizer = null;
 
 // --- Debugging helper ---
 function log(msg) {
@@ -35,43 +35,14 @@ function log(msg) {
   debugLogs.innerHTML = `[${time}] ${msg}<br>` + debugLogs.innerHTML.substring(0, 500);
 }
 
-// --- Engine Initialization ---
-async function initEngine() {
-  if (tokenizer) return;
-  try {
-    log('Initializing Furigana engine...');
-    updateStatus('Loading Dict...', '#fbbf24');
-    
-    if (typeof kuromoji === 'undefined') {
-      log('Error: kuromoji library not loaded. Check index.html tags.');
-      return;
-    }
-
-    kuromoji.builder({ 
-      dictPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/" 
-    }).build((err, _tokenizer) => {
-      if (err) {
-        log('Engine Error: ' + err.message);
-        updateStatus('Basic Mode', '#6366f1');
-        return;
-      }
-      tokenizer = _tokenizer;
-      log('Furigana engine is READY.');
-      updateStatus('Ready', '#10b981');
-    });
-  } catch (err) {
-    log('Critical Engine Error: ' + err.message);
-    updateStatus('Error', '#ef4444');
-  }
-}
-
-// Start engine
-setTimeout(initEngine, 1000); // Small delay to ensure scripts are parsed
+// --- Initialization ---
+log('System starting in Ultra-Light mode...');
+updateStatus('Ready', '#10b981');
 
 // --- File Handling ---
 function handleFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
-  log('Image received: ' + file.name);
+  log('Image selected: ' + file.name);
   selectedFile = file;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -80,7 +51,6 @@ function handleFile(file) {
     previewContainer.hidden = false;
     controls.hidden = false;
     resultsSection.hidden = true;
-    updateStatus('Ready', '#10b981');
   };
   reader.readAsDataURL(file);
 }
@@ -128,10 +98,9 @@ translateBtn.addEventListener('click', async () => {
   updateStatus('Processing...', '#fbbf24');
   
   try {
-    log('OCR started...');
+    log('OCR processing...');
     progressText.innerText = '文字を認識中...';
     const worker = await Tesseract.createWorker('jpn+eng', 1);
-
     const { data: { text } } = await worker.recognize(selectedFile);
     await worker.terminate();
 
@@ -140,32 +109,21 @@ translateBtn.addEventListener('click', async () => {
 
     ocrTextEl.innerHTML = splitIntoWords(text);
 
-    log('Translation started...');
+    log('Translating...');
     progressText.innerText = '翻訳中...';
-    const translationResult = await translateText(text);
+    const result = await translateWithReading(text);
     
-    const translatedText = translationResult.text;
-    const translit = translationResult.translit; // Backup reading
+    log('Done. Rendering results.');
     
-    log('Translation finished.');
-
-    // Process Furigana or Fallback
-    const isTargetJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(translatedText);
-    
+    // Build HTML with Reading (Transliteration)
     let finalHtml = '';
-    if (isTargetJapanese) {
-      if (tokenizer) {
-        log('Generating Furigana using engine...');
-        finalHtml = generateFuriganaHtml(translatedText);
-      } else if (translit) {
-        log('Engine not ready. Using Transliteration fallback.');
-        finalHtml = `<div style="margin-bottom: 0.5rem; color: #94a3b8; font-size: 0.8rem;">Reading: ${translit}</div>` + splitIntoWords(translatedText);
-      } else {
-        finalHtml = splitIntoWords(translatedText);
-      }
-    } else {
-      finalHtml = splitIntoWords(translatedText);
+    if (result.reading) {
+      // Show reading as a small subtitle above the translated text
+      finalHtml = `<div style="margin-bottom: 1rem; padding: 0.5rem; background: rgba(99, 102, 241, 0.1); border-radius: 8px; color: var(--primary); font-size: 0.9rem;">
+                     <strong>Reading:</strong> ${result.reading}
+                   </div>`;
     }
+    finalHtml += splitIntoWords(result.text);
 
     translatedTextEl.innerHTML = finalHtml;
 
@@ -184,20 +142,37 @@ translateBtn.addEventListener('click', async () => {
   }
 });
 
-function generateFuriganaHtml(text) {
-  const tokens = tokenizer.tokenize(text);
-  let html = '';
-  for (const token of tokens) {
-    const surface = token.surface_form;
-    const reading = token.reading;
-    if (reading && surface !== reading && /[\u4E00-\u9FAF]/.test(surface)) {
-      const hira = reading.replace(/[\u30A1-\u30F6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
-      html += `<span class="word"><ruby>${surface}<rt>${hira}</rt></ruby></span>`;
-    } else {
-      html += surface.trim() === '' ? surface : `<span class="word">${surface}</span>`;
+async function translateWithReading(text) {
+  const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+  const sl = isJapanese ? 'ja' : 'en';
+  const tl = isJapanese ? 'en' : 'ja';
+
+  try {
+    // dt=t (translation), dt=rm (transliteration)
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&dt=rm&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    let translated = '';
+    let translit = '';
+    
+    if (data && data[0]) {
+      translated = data[0].map(s => s[0]).join('');
+      // Transliteration is usually in the last block of the first array
+      const lastBlock = data[0][data[0].length - 1];
+      if (lastBlock && lastPartExists(lastBlock)) {
+        translit = lastBlock[lastBlock.length - 1];
+      }
     }
+    
+    return { text: translated, reading: translit };
+  } catch (err) {
+    return { text: '翻訳に失敗しました。', reading: '' };
   }
-  return html;
+}
+
+function lastPartExists(block) {
+  return Array.isArray(block) && block.length >= 3;
 }
 
 function splitIntoWords(text) {
@@ -215,56 +190,17 @@ function splitIntoWords(text) {
   }
 }
 
-async function translateText(text) {
-  const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-  const sl = isJapanese ? 'ja' : 'en';
-  const tl = isJapanese ? 'en' : 'ja';
-
-  try {
-    // dt=t (translation) and dt=rm (transliteration/reading)
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&dt=rm&q=${encodeURIComponent(text)}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    let translated = '';
-    let translit = '';
-    
-    if (data && data[0]) {
-      translated = data[0].map(s => s[0]).join('');
-      // The transliteration is usually in the last index of a specific array
-      // For Google Translate API, it's often data[0][some_index][3] or data[0][last]
-      try {
-        const lastPart = data[0][data[0].length - 1];
-        if (lastPart && lastPart[3]) translit = lastPart[3];
-      } catch (e) {}
-    }
-    
-    return { text: translated, translit: translit };
-  } catch (err) {
-    return { text: '翻訳に失敗しました。', translit: '' };
-  }
-}
-
 // --- Dictionary Logic ---
 document.addEventListener('click', async (e) => {
   const wordEl = e.target.closest('.word');
   if (!wordEl) return;
 
-  let word = '';
-  const rubyBase = wordEl.querySelector('ruby');
-  if (rubyBase) {
-    const clone = rubyBase.cloneNode(true);
-    clone.querySelectorAll('rt').forEach(rt => rt.remove());
-    word = clone.innerText.trim();
-  } else {
-    word = wordEl.innerText.trim();
-  }
-  
-  if (!word || word.length < 1) return;
-  log('Searching word: ' + word);
+  const word = wordEl.innerText.trim();
+  if (!word) return;
+  log('Searching: ' + word);
 
   dictWord.innerText = word;
-  dictMeaning.innerText = '検索中...';
+  dictMeaning.innerText = 'Searching...';
   dictModal.hidden = false;
 
   const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(word);
@@ -277,7 +213,7 @@ document.addEventListener('click', async (e) => {
     const data = await res.json();
     if (data && data[0]) dictMeaning.innerText = data[0][0][0];
   } catch (err) {
-    dictMeaning.innerText = 'エラー';
+    dictMeaning.innerText = 'Error';
   }
 });
 
