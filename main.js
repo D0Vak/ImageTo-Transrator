@@ -1,4 +1,4 @@
-import { createWorker } from 'tesseract.js';
+// Tesseract.js is loaded via CDN in index.html
 
 // Elements
 const dropZone = document.getElementById('drop-zone');
@@ -142,8 +142,8 @@ translateBtn.addEventListener('click', async () => {
   
   try {
     progressText.innerText = 'エンジンを初期化中...';
-    // We try both Japanese and English
-    const worker = await createWorker('jpn+eng', 1, {
+    // Use Tesseract global object instead of imported createWorker
+    const worker = await Tesseract.createWorker('jpn+eng', 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
           const progress = Math.round(m.progress * 100);
