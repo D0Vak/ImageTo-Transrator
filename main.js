@@ -1,4 +1,4 @@
-// Standalone Browser Version (High Reliability Edition)
+// Standalone Browser Version (Ultra Robust Edition)
 
 // Elements
 const dropZone = document.getElementById('drop-zone');
@@ -25,26 +25,31 @@ const dictMeaning = document.getElementById('dict-meaning');
 const closeModal = document.getElementById('close-modal');
 
 let selectedFile = null;
-let kuroshiro = null;
-let isEngineReady = false;
+let tokenizer = null; // Direct Kuromoji tokenizer
 
-// Initialize Furigana Engine (Improved Loading)
+// --- Engine Initialization ---
 async function initEngine() {
-  if (kuroshiro) return;
+  if (tokenizer) return;
   try {
-    updateStatus('Initializing Engine...', '#fbbf24');
-    kuroshiro = new Kuroshiro();
-    // Dictionary path MUST end with a slash for Kuromoji
-    const kuromojiAnalyzer = new KuromojiAnalyzer({
-      dictPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+    updateStatus('Loading Dict (15MB)...', '#fbbf24');
+    console.log('Starting Kuromoji build...');
+    
+    // Using Kuromoji directly for better control
+    kuromoji.builder({ 
+      dictPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/" 
+    }).build((err, _tokenizer) => {
+      if (err) {
+        console.error('Kuromoji build error:', err);
+        updateStatus('Basic Mode', '#6366f1');
+        return;
+      }
+      tokenizer = _tokenizer;
+      console.log('Kuromoji engine ready');
+      updateStatus('Ready', '#10b981');
     });
-    await kuroshiro.init(kuromojiAnalyzer);
-    console.log('Kuroshiro initialized successfully');
-    isEngineReady = true;
-    updateStatus('Ready', '#10b981');
   } catch (err) {
-    console.error('Kuroshiro init failed:', err);
-    updateStatus('Basic Mode (No Furigana)', '#6366f1');
+    console.error('Engine init failed:', err);
+    updateStatus('Offline Mode', '#ef4444');
   }
 }
 
@@ -66,7 +71,7 @@ function handleFile(file) {
   reader.readAsDataURL(file);
 }
 
-// Events
+// Drag & Drop
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', (e) => {
@@ -109,13 +114,13 @@ translateBtn.addEventListener('click', async () => {
   updateStatus('Processing...', '#fbbf24');
   
   try {
-    progressText.innerText = '文字を認識中 (OCR)...';
+    progressText.innerText = '文字を認識中...';
     const worker = await Tesseract.createWorker('jpn+eng', 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
           const p = Math.round(m.progress * 100);
           progressFill.style.width = `${p}%`;
-          progressText.innerText = `認識中... ${p}%`;
+          progressText.innerText = `解析中... ${p}%`;
         }
       }
     });
@@ -125,26 +130,19 @@ translateBtn.addEventListener('click', async () => {
 
     if (!text.trim()) throw new Error('文字が検出されませんでした。');
 
-    // Split OCR text into words for dictionary
+    // Split OCR text into words
     ocrTextEl.innerHTML = splitIntoWords(text);
 
-    progressText.innerText = '翻訳中 (AI)...';
+    progressText.innerText = '翻訳中...';
     const translatedText = await translateText(text);
     
-    // Check if target is Japanese
+    // Process Furigana
     const isTargetJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(translatedText);
     
     let finalHtml = '';
-    if (isTargetJapanese && isEngineReady) {
+    if (isTargetJapanese && tokenizer) {
       progressText.innerText = 'ふりがなを生成中...';
-      try {
-        finalHtml = await kuroshiro.convert(translatedText, { mode: "furigana", to: "hiragana" });
-        // Wrap the furigana HTML to make words clickable
-        finalHtml = wrapFuriganaHtml(finalHtml);
-      } catch (e) {
-        console.error('Furigana conversion failed:', e);
-        finalHtml = splitIntoWords(translatedText);
-      }
+      finalHtml = generateFuriganaHtml(translatedText);
     } else {
       finalHtml = splitIntoWords(translatedText);
     }
@@ -166,50 +164,66 @@ translateBtn.addEventListener('click', async () => {
 });
 
 /**
- * Split text into individual clickable words using Intl.Segmenter (Reliable)
+ * Generate Ruby HTML using Kuromoji directly
  */
-function splitIntoWords(text) {
-  const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-  const locale = isJapanese ? 'ja' : 'en';
+function generateFuriganaHtml(text) {
+  if (!tokenizer) return splitIntoWords(text);
   
-  // Intl.Segmenter is a built-in browser API that's very reliable for word splitting
+  const tokens = tokenizer.tokenize(text);
+  let html = '';
+  
+  for (const token of tokens) {
+    const surface = token.surface_form;
+    const reading = token.reading; // Katakana reading
+    
+    if (reading && surface !== reading && /[\u4E00-\u9FAF]/.test(surface)) {
+      // It's a kanji with a reading
+      const hiragana = katakanaToHiragana(reading);
+      html += `<span class="word"><ruby>${surface}<rt>${hiragana}</rt></ruby></span>`;
+    } else {
+      // Not kanji or reading is same as surface
+      if (surface.trim() === '') {
+        html += surface;
+      } else {
+        html += `<span class="word">${surface}</span>`;
+      }
+    }
+  }
+  return html;
+}
+
+function katakanaToHiragana(src) {
+  return src.replace(/[\u30A1-\u30F6]/g, (match) => {
+    return String.fromCharCode(match.charCodeAt(0) - 0x60);
+  });
+}
+
+function splitIntoWords(text) {
   try {
-    const segmenter = new Intl.Segmenter(locale, { granularity: 'word' });
+    const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+    const segmenter = new Intl.Segmenter(isJapanese ? 'ja' : 'en', { granularity: 'word' });
     const segments = segmenter.segment(text);
     let html = '';
-    
     for (const { segment, isWordLike } of segments) {
       if (isWordLike) {
         html += `<span class="word">${segment}</span>`;
       } else {
-        // Punctuation or whitespace
         html += segment;
       }
     }
     return html;
   } catch (e) {
-    // Fallback to simple split if Intl.Segmenter is not available
     return text.split(/(\s+)/).map(s => s.trim() ? `<span class="word">${s}</span>` : s).join('');
   }
 }
 
-/**
- * Wrap Furigana HTML (from Kuroshiro) to make individual ruby elements clickable
- */
-function wrapFuriganaHtml(html) {
-  // Regex to match ruby tags or non-tag sequences
-  return html.replace(/<ruby>.*?<\/ruby>|[^<>\s]+/g, (match) => {
-    return `<span class="word">${match}</span>`;
-  });
-}
-
 async function translateText(text) {
   const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-  const sourceLang = isJapanese ? 'ja' : 'en';
-  const targetLang = isJapanese ? 'en' : 'ja';
+  const sl = isJapanese ? 'ja' : 'en';
+  const tl = isJapanese ? 'en' : 'ja';
 
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
     const response = await fetch(url);
     const data = await response.json();
     if (data && data[0]) return data[0].map(s => s[0]).join('');
@@ -221,20 +235,27 @@ async function translateText(text) {
 
 // --- Dictionary Logic ---
 document.addEventListener('click', async (e) => {
-  // Find the closest .word element (handles clicks inside ruby tags too)
   const wordEl = e.target.closest('.word');
   if (!wordEl) return;
 
-  // Extract clean text from word element (ignoring furigana for search)
-  const word = wordEl.innerText.replace(/\s+/g, '');
-  if (!word || word.length < 1) return;
+  // For ruby tags, we want the base text, not the ruby text
+  let word = '';
+  const rubyBase = wordEl.querySelector('ruby');
+  if (rubyBase) {
+    // Clone and remove rt to get just the kanji
+    const clone = rubyBase.cloneNode(true);
+    clone.querySelectorAll('rt').forEach(rt => rt.remove());
+    word = clone.innerText.trim();
+  } else {
+    word = wordEl.innerText.trim();
+  }
+  
+  if (!word) return;
 
-  // Show modal
   dictWord.innerText = word;
   dictMeaning.innerText = '検索中...';
   dictModal.hidden = false;
 
-  // Translate word
   const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(word);
   const sl = isJapanese ? 'ja' : 'en';
   const tl = isJapanese ? 'en' : 'ja';
@@ -253,19 +274,6 @@ document.addEventListener('click', async (e) => {
 
 closeModal.addEventListener('click', () => dictModal.hidden = true);
 window.addEventListener('click', (e) => { if (e.target === dictModal) dictModal.hidden = true; });
-
-// Copy to Clipboard
-document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('copy-btn')) {
-    const targetId = e.target.getAttribute('data-target');
-    const text = document.getElementById(targetId).innerText;
-    navigator.clipboard.writeText(text).then(() => {
-      const orig = e.target.innerText;
-      e.target.innerText = 'コピー完了！';
-      setTimeout(() => e.target.innerText = orig, 2000);
-    });
-  }
-});
 
 function updateStatus(text, color) {
   statusText.innerText = text;
