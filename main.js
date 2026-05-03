@@ -1,5 +1,5 @@
-// Standalone Browser Version (Ultra-Light & High Speed Edition)
-// No heavy dictionary downloads required.
+// Standalone Browser Version (Hybrid Ruby Edition)
+// Combines native Intl.Segmenter for splitting and Kuromoji for premium Furigana.
 
 // Elements
 const dropZone = document.getElementById('drop-zone');
@@ -27,6 +27,7 @@ const dictMeaning = document.getElementById('dict-meaning');
 const closeModal = document.getElementById('close-modal');
 
 let selectedFile = null;
+let tokenizer = null;
 
 // --- Debugging helper ---
 function log(msg) {
@@ -35,9 +36,39 @@ function log(msg) {
   debugLogs.innerHTML = `[${time}] ${msg}<br>` + debugLogs.innerHTML.substring(0, 500);
 }
 
-// --- Initialization ---
-log('System starting in Ultra-Light mode...');
-updateStatus('Ready', '#10b981');
+// --- Engine Initialization ---
+async function initEngine() {
+  if (tokenizer) return;
+  try {
+    log('Initializing Furigana engine (Kuromoji)...');
+    updateStatus('Loading Dict...', '#fbbf24');
+    
+    if (typeof kuromoji === 'undefined') {
+      log('Error: kuromoji library not found.');
+      return;
+    }
+
+    // Using unpkg for better reliability for dictionary files
+    kuromoji.builder({ 
+      dictPath: "https://unpkg.com/kuromoji@0.1.2/dict/" 
+    }).build((err, _tokenizer) => {
+      if (err) {
+        log('Engine Error: ' + err.message);
+        updateStatus('Basic Mode', '#6366f1');
+        return;
+      }
+      tokenizer = _tokenizer;
+      log('Furigana engine is READY.');
+      updateStatus('Ready', '#10b981');
+    });
+  } catch (err) {
+    log('Critical Engine Error: ' + err.message);
+    updateStatus('Error', '#ef4444');
+  }
+}
+
+// Small delay to ensure all scripts are ready
+setTimeout(initEngine, 500);
 
 // --- File Handling ---
 function handleFile(file) {
@@ -111,21 +142,17 @@ translateBtn.addEventListener('click', async () => {
 
     log('Translating...');
     progressText.innerText = '翻訳中...';
-    const result = await translateWithReading(text);
-    
-    log('Done. Rendering results.');
-    
-    // Build HTML with Reading (Transliteration)
-    let finalHtml = '';
-    if (result.reading) {
-      // Show reading as a small subtitle above the translated text
-      finalHtml = `<div style="margin-bottom: 1rem; padding: 0.5rem; background: rgba(99, 102, 241, 0.1); border-radius: 8px; color: var(--primary); font-size: 0.9rem;">
-                     <strong>Reading:</strong> ${result.reading}
-                   </div>`;
-    }
-    finalHtml += splitIntoWords(result.text);
+    const translatedText = await translateText(text);
+    log('Done. Rendering result.');
 
-    translatedTextEl.innerHTML = finalHtml;
+    // Build the final HTML with Ruby/Dictionary support
+    const isTargetJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(translatedText);
+    
+    if (isTargetJapanese) {
+      translatedTextEl.innerHTML = await buildJapaneseHtml(translatedText);
+    } else {
+      translatedTextEl.innerHTML = splitIntoWords(translatedText);
+    }
 
     resultsSection.hidden = false;
     progressContainer.hidden = true;
@@ -142,37 +169,41 @@ translateBtn.addEventListener('click', async () => {
   }
 });
 
-async function translateWithReading(text) {
-  const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-  const sl = isJapanese ? 'ja' : 'en';
-  const tl = isJapanese ? 'en' : 'ja';
+/**
+ * Builds HTML for Japanese text, adding Furigana (if engine ready) and word spans.
+ */
+async function buildJapaneseHtml(text) {
+  const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
+  const segments = segmenter.segment(text);
+  let html = '';
 
-  try {
-    // dt=t (translation), dt=rm (transliteration)
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&dt=rm&q=${encodeURIComponent(text)}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    let translated = '';
-    let translit = '';
-    
-    if (data && data[0]) {
-      translated = data[0].map(s => s[0]).join('');
-      // Transliteration is usually in the last block of the first array
-      const lastBlock = data[0][data[0].length - 1];
-      if (lastBlock && lastPartExists(lastBlock)) {
-        translit = lastBlock[lastBlock.length - 1];
-      }
+  for (const { segment, isWordLike } of segments) {
+    if (!isWordLike) {
+      html += segment;
+      continue;
     }
-    
-    return { text: translated, reading: translit };
-  } catch (err) {
-    return { text: '翻訳に失敗しました。', reading: '' };
-  }
-}
 
-function lastPartExists(block) {
-  return Array.isArray(block) && block.length >= 3;
+    // Process individual word for Furigana if it contains Kanji
+    if (tokenizer && /[\u4E00-\u9FAF]/.test(segment)) {
+      const tokens = tokenizer.tokenize(segment);
+      let wordHtml = '';
+      for (const t of tokens) {
+        const s = t.surface_form;
+        const r = t.reading;
+        if (r && s !== r && /[\u4E00-\u9FAF]/.test(s)) {
+          const hira = r.replace(/[\u30A1-\u30F6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
+          wordHtml += `<ruby>${s}<rt>${hira}</rt></ruby>`;
+        } else {
+          wordHtml += s;
+        }
+      }
+      html += `<span class="word">${wordHtml}</span>`;
+    } else {
+      // No Kanji or no engine, just wrap as a word
+      html += `<span class="word">${segment}</span>`;
+    }
+  }
+  return html;
 }
 
 function splitIntoWords(text) {
@@ -190,17 +221,43 @@ function splitIntoWords(text) {
   }
 }
 
+async function translateText(text) {
+  const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+  const sl = isJapanese ? 'ja' : 'en';
+  const tl = isJapanese ? 'en' : 'ja';
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data && data[0]) return data[0].map(s => s[0]).join('');
+    throw new Error();
+  } catch (err) {
+    return '翻訳に失敗しました。';
+  }
+}
+
 // --- Dictionary Logic ---
 document.addEventListener('click', async (e) => {
   const wordEl = e.target.closest('.word');
   if (!wordEl) return;
 
-  const word = wordEl.innerText.trim();
-  if (!word) return;
-  log('Searching: ' + word);
+  // Extract clean text from word element (ignoring furigana for search)
+  let word = '';
+  const rubyTag = wordEl.querySelector('ruby');
+  if (rubyTag) {
+    const clone = rubyTag.cloneNode(true);
+    clone.querySelectorAll('rt').forEach(rt => rt.remove());
+    word = clone.innerText.trim();
+  } else {
+    word = wordEl.innerText.trim();
+  }
+  
+  if (!word || word.length < 1) return;
+  log('Searching word: ' + word);
 
   dictWord.innerText = word;
-  dictMeaning.innerText = 'Searching...';
+  dictMeaning.innerText = '検索中...';
   dictModal.hidden = false;
 
   const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(word);
@@ -213,7 +270,7 @@ document.addEventListener('click', async (e) => {
     const data = await res.json();
     if (data && data[0]) dictMeaning.innerText = data[0][0][0];
   } catch (err) {
-    dictMeaning.innerText = 'Error';
+    dictMeaning.innerText = 'エラー';
   }
 });
 

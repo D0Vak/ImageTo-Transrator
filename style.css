@@ -267,14 +267,18 @@ header {
 }
 
 ruby {
+  ruby-position: over;
   ruby-align: center;
 }
 
 rt {
-  font-size: 0.65em;
+  font-size: 0.55em;
   color: var(--primary);
-  opacity: 0.9;
-  letter-spacing: 0;
+  opacity: 0.85;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding-bottom: 2px;
+  font-family: sans-serif;
 }
 
 /* Word Interaction Styles */
