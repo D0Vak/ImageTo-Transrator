@@ -1,5 +1,5 @@
-// ImageTo-Transrator (Reliable Dictionary Edition)
-// Features: OCR, Full Translation, and Word-by-Word Dictionary with Pronunciation.
+// ImageTo-Transrator (v3.0 - Professional Dictionary Edition)
+// Using Wanakana for perfect Hiragana and external dictionary links.
 
 // Elements
 const dropZone = document.getElementById('drop-zone');
@@ -36,28 +36,8 @@ function log(msg) {
   debugLogs.innerHTML = `[${time}] ${msg}<br>` + debugLogs.innerHTML.substring(0, 500);
 }
 
-// --- Romaji to Hiragana (Internal Helper) ---
-const ROMAJI_MAP = {
-  'a':'あ','i':'い','u':'う','e':'え','o':'お','ka':'か','ki':'き','ku':'く','ke':'け','ko':'こ',
-  'sa':'さ','shi':'し','su':'す','se':'せ','so':'そ','ta':'た','chi':'ち','tsu':'つ','te':'て','to':'と',
-  'na':'な','ni':'に','nu':'ぬ','ne':'ね','no':'の','ha':'は','hi':'ひ','fu':'ふ','he':'へ','ho':'ほ',
-  'ma':'ま','mi':'み','mu':'む','me':'め','mo':'も','ya':'や','yu':'ゆ','yo':'よ','ra':'ら','ri':'り',
-  'ru':'ら','re':'れ','ro':'ろ','wa':'わ','wo':'を','n':'ん','ga':'が','gi':'ぎ','gu':'ぐ','ge':'げ',
-  'go':'ご','za':'ざ','ji':'じ','zu':'ず','ze':'ぜ','zo':'ぞ','da':'だ','ji':'ぢ','zu':'づ','de':'で',
-  'do':'ど','ba':'ば','bi':'び','bu':'ぶ','be':'べ','bo':'ぼ','pa':'ぱ','pi':'ぴ','pu':'ぷ','pe':'ぺ','po':'ぽ'
-};
-
-function toHiragana(romaji) {
-  if (!romaji) return "";
-  let res = romaji.toLowerCase().replace(/[^\w\s]/g, '');
-  Object.keys(ROMAJI_MAP).sort((a,b) => b.length - a.length).forEach(key => {
-    res = res.split(key).join(ROMAJI_MAP[key]);
-  });
-  return res;
-}
-
 // --- Initialization ---
-log('System Ready. Click words to see reading and meaning.');
+log('v3.0 Ready. Using Wanakana for perfect Hiragana conversion.');
 updateStatus('Ready', '#10b981');
 
 // --- File Handling ---
@@ -75,7 +55,7 @@ function handleFile(file) {
   reader.readAsDataURL(file);
 }
 
-// Paste Event
+// Events
 window.addEventListener('paste', (e) => {
   const items = e.clipboardData.items;
   for (let i = 0; i < items.length; i++) {
@@ -86,7 +66,6 @@ window.addEventListener('paste', (e) => {
   }
 });
 
-// Drag & Drop
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', (e) => {
@@ -119,21 +98,18 @@ translateBtn.addEventListener('click', async () => {
   updateStatus('Processing...', '#fbbf24');
   
   try {
-    log('OCR Processing...');
+    log('Recognizing text...');
     progressText.innerText = '文字を認識中...';
     const worker = await Tesseract.createWorker('jpn+eng', 1);
     const { data: { text } } = await worker.recognize(selectedFile);
     await worker.terminate();
 
     if (!text.trim()) throw new Error('文字が見つかりませんでした。');
-    log('OCR Done.');
-
     ocrTextEl.innerHTML = splitIntoWords(text);
 
     log('Translating...');
     progressText.innerText = '翻訳中...';
     const translatedText = await translateText(text);
-    
     translatedTextEl.innerHTML = splitIntoWords(translatedText);
 
     resultsSection.hidden = false;
@@ -182,7 +158,7 @@ function splitIntoWords(text) {
   }
 }
 
-// --- Dictionary Logic (Word + Reading + Meaning) ---
+// --- Dictionary Logic ---
 document.addEventListener('click', async (e) => {
   const wordEl = e.target.closest('.word');
   if (!wordEl) return;
@@ -190,10 +166,10 @@ document.addEventListener('click', async (e) => {
   const word = wordEl.innerText.trim();
   if (!word || word.length < 1) return;
 
-  log('Lookup: ' + word);
+  log('Deep Lookup: ' + word);
   dictWord.innerText = word;
   dictReading.innerText = '';
-  dictMeaning.innerText = '読み込み中...';
+  dictMeaning.innerText = '検索中...';
   dictModal.hidden = false;
 
   const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(word);
@@ -201,30 +177,41 @@ document.addEventListener('click', async (e) => {
   const tl = isJapanese ? 'en' : 'ja';
   
   try {
-    // Fetch translation (dt=t) and transliteration/reading (dt=rm)
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&dt=rm&q=${encodeURIComponent(word)}`;
+    // Requesting t (translation), at (alternate translations), rm (transliteration)
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&dt=at&dt=rm&q=${encodeURIComponent(word)}`;
     const res = await fetch(url);
     const data = await res.json();
     
     if (data && data[0]) {
-      const meaning = data[0][0][0];
-      dictMeaning.innerText = meaning;
+      let meaningsHtml = `<strong>Main:</strong> ${data[0][0][0]}`;
       
-      // Get reading from the transliteration data
-      // For single words, it's often in a predictable spot
+      // Alternative meanings if available
+      if (data[1] && data[1][0] && data[1][0][1]) {
+        meaningsHtml += `<br><br><strong>Alternatives:</strong><br>${data[1][0][1].slice(0, 5).join(', ')}`;
+      }
+      dictMeaning.innerHTML = meaningsHtml;
+      
+      // Reading/Pronunciation logic
       try {
-        const lastArr = data[0][data[0].length - 1];
-        const rawReading = (isJapanese) ? lastArr[lastArr.length - 1] : data[0][0][3];
-        
-        if (rawReading && rawReading !== word) {
-          if (isJapanese) {
-            dictReading.innerText = '読み: ' + toHiragana(rawReading);
-          } else {
-            dictReading.innerText = 'Pronunciation: ' + rawReading;
+        let rawReading = '';
+        if (isJapanese) {
+          // Transliteration is usually in the last block
+          const lastArr = data[0][data[0].length - 1];
+          rawReading = lastArr[lastArr.length - 1];
+          if (rawReading && typeof wanakana !== 'undefined') {
+            dictReading.innerText = '読み: ' + wanakana.toHiragana(rawReading);
           }
+        } else {
+          rawReading = data[0][0][3];
+          if (rawReading) dictReading.innerText = 'Pronunciation: ' + rawReading;
         }
       } catch (e) {
-        console.log('Reading not found');
+        log('Could not determine reading');
+      }
+
+      // Add External Jisho Link for Japanese
+      if (isJapanese) {
+        dictMeaning.innerHTML += `<br><a href="https://jisho.org/search/${encodeURIComponent(word)}" target="_blank" class="jisho-link">Jisho.org で全ての読み・詳細を見る ↗</a>`;
       }
     }
   } catch (err) {
