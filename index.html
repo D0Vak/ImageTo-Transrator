@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ImageTo-Transrator | AI Image Translator</title>
+    <meta name="description" content="Translate text from images between Japanese and English using AI." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body tabindex="0">
+    <div id="app">
+      <header>
+        <div class="logo">
+          <span class="gradient-text">ImageTo-Transrator</span>
+        </div>
+        <nav>
+          <div class="status-indicator" id="status-indicator">
+            <span class="dot"></span>
+            <span class="status-text">Ready</span>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <h1>AI Image <span class="highlight">Translator</span></h1>
+          <p>写真をアップロードするだけで、英語を日本語に、日本語を英語に瞬時に翻訳します。</p>
+        </section>
+
+        <section class="upload-section">
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-content" id="drop-zone-content">
+              <div class="icon">📸</div>
+              <p>ここに画像をドラッグ＆ドロップ、またはクリックして選択</p>
+              <p class="small-text">（Ctrl+V で画像を貼り付けも可能）</p>
+              <input type="file" id="file-input" accept="image/*" hidden>
+            </div>
+            <div class="preview-container" id="preview-container" hidden>
+              <img id="image-preview" src="" alt="Preview">
+              <div class="overlay-controls">
+                <button id="reset-btn" class="btn-secondary">別の画像を選ぶ</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="controls" id="controls" hidden>
+          <button id="translate-btn" class="btn-primary">翻訳を開始する</button>
+          <div class="progress-container" id="progress-container" hidden>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <p id="progress-text">テキストを解析中...</p>
+          </div>
+        </section>
+
+        <section class="results-section" id="results-section" hidden>
+          <div class="result-grid">
+            <div class="result-card">
+              <h3>認識されたテキスト</h3>
+              <div class="text-box" id="ocr-text"></div>
+              <button class="copy-btn" data-target="ocr-text">コピー</button>
+            </div>
+            <div class="result-card featured">
+              <h3>翻訳結果</h3>
+              <div class="text-box" id="translated-text"></div>
+              <button class="copy-btn" data-target="translated-text">コピー</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>&copy; 2026 ImageTo-Transrator. Built with AI.</p>
+      </footer>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
