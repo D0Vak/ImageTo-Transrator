@@ -266,6 +266,17 @@ header {
   border: 1px solid var(--glass-border);
 }
 
+ruby {
+  ruby-align: center;
+}
+
+rt {
+  font-size: 0.65em;
+  color: var(--primary);
+  opacity: 0.9;
+  letter-spacing: 0;
+}
+
 .copy-btn {
   align-self: flex-end;
   background: transparent;
